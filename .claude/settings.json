@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio run *)",
+      "PowerShell($p = \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\"; if \\(Test-Path $p\\) { \"FOUND: $p\" } else { \"not in default location\"; Get-Command pio -ErrorAction SilentlyContinue })",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e oled)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e diag)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e diag 2>&1 | Select-Object -Last 25)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" device list)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e diag -t upload --upload-port COM5)",
+      "WebFetch(domain:elkim.no)",
+      "WebSearch",
+      "WebFetch(domain:www.kjell.com)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 2>&1 | Select-Object -Last 15)",
+      "WebFetch(domain:support.marinetraffic.com)",
+      "WebFetch(domain:developer.barentswatch.no)",
+      "WebFetch(domain:marineplan.com)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 2>&1 | Select-Object -Last 18)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 -t upload --upload-port COM5 2>&1 | Select-Object -Last 16)",
+      "WebFetch(domain:www.kystverket.no)",
+      "WebFetch(domain:www.barentswatch.no)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 2>&1 | Select-Object -Last 16)",
+      "WebFetch(domain:skipssok.sdir.no)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 2>&1 | Select-String -Pattern \"error:|error \" | Select-Object -First 12)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 -t upload --upload-port COM5 2>&1 | Select-Object -Last 12)",
+      "PowerShell($tools = @\\(\\); foreach\\($c in 'g++','gcc','python','python3'\\){ $p=\\(Get-Command $c -ErrorAction SilentlyContinue\\); if\\($p\\){$tools += \"$c -> $\\($p.Source\\)\"} }; $tools; \"---pyais---\"; try { python -c \"import pyais,sys; print\\('pyais', pyais.__version__\\)\" } catch { \"no pyais\" })",
+      "PowerShell($lib = \"C:\\\\Users\\\\kenne\\\\WebstormProjects\\\\anchorwatch\\\\lib\\\\AisEncoder\"; g++ -std=c++11 -I\"C:\\\\Users\\\\kenne\\\\aisverify\" -I\"$lib\" \"C:\\\\Users\\\\kenne\\\\aisverify\\\\verify.cpp\" -o \"C:\\\\Users\\\\kenne\\\\aisverify\\\\verify.exe\"; if \\($?\\) { & \"C:\\\\Users\\\\kenne\\\\aisverify\\\\verify.exe\" })",
+      "PowerShell(\"cleaned up\")",
+      "WebFetch(domain:signalk.org)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 2>&1 | Select-Object -Last 14)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 -t upload --upload-port COM5 2>&1 | Select-Object -Last 10)",
+      "PowerShell($p = New-Object System.IO.Ports.SerialPort\\('COM5',115200,'None',8,'One'\\); $p.ReadTimeout = 500; try { $p.Open\\(\\) } catch { \"Kunne ikke aapne COM5: $_\"; return }; $sb = New-Object System.Text.StringBuilder; $end = \\(Get-Date\\).AddSeconds\\(45\\); while \\(\\(Get-Date\\) -lt $end\\) { try { $line = $p.ReadLine\\(\\); [void]$sb.AppendLine\\($line\\) } catch { } }; $p.Close\\(\\); $sb.ToString\\(\\))",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 2>&1 | Select-Object -Last 6)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 -t upload --upload-port COM5 2>&1 | Select-Object -Last 8)",
+      "WebFetch(domain:github.com)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 2>&1 | Select-Object -Last 4; if \\($?\\) { & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 -t upload --upload-port COM5 2>&1 | Select-Object -Last 5 })",
+      "PowerShell($p = New-Object System.IO.Ports.SerialPort\\('COM5',115200,'None',8,'One'\\); $p.ReadTimeout = 500; try { $p.Open\\(\\) } catch { \"Kunne ikke aapne COM5: $_\"; return }; $sb = New-Object System.Text.StringBuilder; $end = \\(Get-Date\\).AddSeconds\\(40\\); while \\(\\(Get-Date\\) -lt $end\\) { try { $line = $p.ReadLine\\(\\); if\\($line -match 'AIS>'\\){ [void]$sb.AppendLine\\($line\\) } } catch { } }; $p.Close\\(\\); $sb.ToString\\(\\))",
+      "WebFetch(domain:api.vesselfinder.com)",
+      "WebFetch(domain:sailserver.com)",
+      "WebFetch(domain:help.marinetraffic.com)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\kenne\\aisverify"
+    ]
+  }
+}
