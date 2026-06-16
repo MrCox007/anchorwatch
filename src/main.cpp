@@ -8,6 +8,9 @@
 #include <SoftwareSerial.h>
 #include <anchor_logic.h>
 #include <ais_encoder.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 // ======== PIN CONFIGURATION ========
 // GPS: connect GPS TX → D5 (GPIO14), GPS RX → D6 (GPIO12)
@@ -67,6 +70,10 @@ SoftwareSerial gpsSerial(GPS_RX_PIN, GPS_TX_PIN);
 ESP8266WebServer server(80);
 AnchorState anchor;
 WiFiUDP aisUdp;
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+static const uint8_t OLED_ADDR = 0x3C;  // try 0x3D if the screen stays blank
+bool oledOK = false;
+unsigned long lastDisplay = 0;
 
 double currentLat = 0.0;
 double currentLng = 0.0;
@@ -456,6 +463,70 @@ void updateStatusLed() {
   }
 }
 
+// Map satellite count to a 0..5 signal level.
+int signalBars(uint32_t sats) {
+  if (sats >= 10) return 5;
+  if (sats >= 8) return 4;
+  if (sats >= 6) return 3;
+  if (sats >= 4) return 2;
+  if (sats >= 1) return 1;
+  return 0;
+}
+
+// Draw a 5-bar signal meter with its top-left corner at (x, y).
+void drawSignalBars(int x, int y, int bars) {
+  const int barW = 4, gap = 2, maxH = 12;
+  for (int i = 0; i < 5; i++) {
+    int h = (maxH * (i + 1)) / 5;
+    int bx = x + i * (barW + gap);
+    int by = y + (maxH - h);
+    if (i < bars) display.fillRect(bx, by, barW, h, SSD1306_WHITE);
+    else          display.drawRect(bx, by, barW, h, SSD1306_WHITE);
+  }
+}
+
+// Draw live status on the OLED: anchor watch on/off, GPS strength, radius.
+void renderDisplay() {
+  if (!oledOK) return;
+  uint32_t sats = satelliteCount;
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  // Anchor watch state
+  display.setCursor(0, 0);
+  display.print("Ankervakt: ");
+  display.print(anchor.anchorSet ? (anchor.alarmActive ? "ALARM" : "PAA") : "AV");
+
+  // GPS strength (satellites + signal bars)
+  display.setCursor(0, 16);
+  display.print("GPS: ");
+  display.print(sats);
+  display.print(" sat");
+  drawSignalBars(128 - 30, 15, signalBars(sats));
+
+  // Anchor radius
+  display.setCursor(0, 30);
+  display.print("Radius: ");
+  display.print(anchor.alarmRadius, 0);
+  display.print(" m");
+
+  // Distance from anchor when armed
+  display.setCursor(0, 42);
+  if (anchor.anchorSet) {
+    display.print("Avstand: ");
+    display.print(anchor.currentDistance, 0);
+    display.print(" m");
+  }
+
+  // Internet status
+  display.setCursor(0, 54);
+  display.print("Nett: ");
+  display.print(WiFi.status() == WL_CONNECTED ? "online" : "offline");
+
+  display.display();
+}
+
 // ======== TRACCAR REPORTING ========
 void reportToTraccar(bool alarm) {
   if (WiFi.status() != WL_CONNECTED || !gpsValid()) return;
@@ -552,6 +623,22 @@ void setup() {
   gpsSerial.begin(GPS_BAUD);
   Serial.println("GPS serial started");
 
+  // OLED (I2C: SDA=D2/GPIO4, SCL=D1/GPIO5)
+  Wire.begin();
+  oledOK = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  if (oledOK) {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(2);
+    display.setCursor(0, 0);
+    display.println("Anchor");
+    display.println("Watch");
+    display.display();
+    Serial.println("OLED OK");
+  } else {
+    Serial.println("OLED not found (check wiring / try 0x3D)");
+  }
+
   // AP for local config; AP+STA so we can also reach the internet for AIS/Traccar
   WiFi.mode(WIFI_AP_STA);
   WiFi.persistent(false);
@@ -602,6 +689,12 @@ void loop() {
   updateStatusLed();
   checkButton();
   manageWifi();
+
+  // Refresh OLED ~2x/sec
+  if (millis() - lastDisplay > 500) {
+    lastDisplay = millis();
+    renderDisplay();
+  }
 
   // Traccar: periodic + immediately on alarm change
   if (strlen(cfg.staSsid) > 0 && strlen(cfg.traccarHost) > 0) {

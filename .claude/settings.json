@@ -37,7 +37,9 @@
       "PowerShell($p = New-Object System.IO.Ports.SerialPort\\('COM5',115200,'None',8,'One'\\); $p.ReadTimeout = 500; try { $p.Open\\(\\) } catch { \"Kunne ikke aapne COM5: $_\"; return }; $sb = New-Object System.Text.StringBuilder; $end = \\(Get-Date\\).AddSeconds\\(40\\); while \\(\\(Get-Date\\) -lt $end\\) { try { $line = $p.ReadLine\\(\\); if\\($line -match 'AIS>'\\){ [void]$sb.AppendLine\\($line\\) } } catch { } }; $p.Close\\(\\); $sb.ToString\\(\\))",
       "WebFetch(domain:api.vesselfinder.com)",
       "WebFetch(domain:sailserver.com)",
-      "WebFetch(domain:help.marinetraffic.com)"
+      "WebFetch(domain:help.marinetraffic.com)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 2>&1 | Select-Object -Last 8)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e esp8266 -t upload --upload-port COM5 2>&1 | Select-Object -Last 6)"
     ],
     "additionalDirectories": [
       "C:\\Users\\kenne\\aisverify"
