@@ -30,7 +30,7 @@ static const unsigned long AIS_STATIC_INTERVAL_MS = 360000;  // 6 min
 
 // ---- TEMPORARY: fake GPS for testing without a working GPS module ----
 // Set USE_FAKE_GPS = false once the real GPS is connected and working.
-static const bool USE_FAKE_GPS = true;
+static const bool USE_FAKE_GPS = false;
 static const double FAKE_LAT = 63.33138594195133;
 static const double FAKE_LNG = 10.072873222653783;
 
@@ -143,7 +143,7 @@ void manageWifi() {
 }
 
 // True if we have a usable position (real GPS fix, or the temporary fake one).
-bool gpsValid() { return USE_FAKE_GPS || gpsValid(); }
+bool gpsValid() { return USE_FAKE_GPS || gps.location.isValid(); }
 
 String jsonEscape(const char* s) {
   String o;
@@ -543,7 +543,7 @@ void reportToTraccar(bool alarm) {
 
   WiFiClient client;
   HTTPClient http;
-  http.setTimeout(5000);
+  http.setTimeout(2000);  // keep under the ~3s software watchdog
   if (http.begin(client, url)) {
     int code = http.GET();
     Serial.print("Traccar (");
@@ -555,9 +555,28 @@ void reportToTraccar(bool alarm) {
 }
 
 // ======== AIS REPORTING ========
-void sendAisTo(const char* host, uint16_t port, const String& sentence) {
+// Cached resolved IPs for the AIS hosts. DNS is done once per host (not on every
+// send), so a slow lookup can never block the loop long enough to trip the
+// software watchdog.
+IPAddress aisIp1, aisIp2;
+bool aisIp1Ok = false, aisIp2Ok = false;
+
+void sendAisTo(const char* host, uint16_t port, IPAddress& ip, bool& ipOk, const String& sentence) {
   if (strlen(host) == 0 || port == 0) return;
-  int b = aisUdp.beginPacket(host, port);
+  if (!ipOk) {
+    // The first DNS lookup can take a few seconds; disable the soft watchdog
+    // around it so the resolution can't trip a reset (hardware WDT still guards).
+    ESP.wdtDisable();
+    int r = WiFi.hostByName(host, ip);
+    ESP.wdtEnable(0);
+    if (r != 1) {
+      Serial.printf("AIS: DNS lookup failed for %s\n", host);
+      return;  // try again next time; never block repeatedly
+    }
+    ipOk = true;
+    Serial.printf("AIS: resolved %s -> %s\n", host, ip.toString().c_str());
+  }
+  int b = aisUdp.beginPacket(ip, port);  // IP -> no DNS, non-blocking
   aisUdp.print(sentence);
   aisUdp.print("\r\n");
   int e = aisUdp.endPacket();
@@ -565,31 +584,12 @@ void sendAisTo(const char* host, uint16_t port, const String& sentence) {
 }
 
 void sendAis(const String& sentence) {
-  sendAisTo(cfg.aisHost, cfg.aisPort, sentence);    // MarineTraffic
-  sendAisTo(cfg.aisHost2, cfg.aisPort2, sentence);  // AISHub (if set)
-}
-
-// One-off internet reachability check (logs STA IP + an HTTP probe).
-bool didNetTest = false;
-void testInternet() {
-  Serial.print("STA IP: ");
-  Serial.println(WiFi.localIP());
-  WiFiClient c;
-  HTTPClient h;
-  h.setTimeout(4000);
-  if (h.begin(c, "http://clients3.google.com/generate_204")) {
-    int code = h.GET();
-    Serial.print("Internet check (expect 204): HTTP ");
-    Serial.println(code);
-    h.end();
-  } else {
-    Serial.println("Internet check: begin failed");
-  }
+  sendAisTo(cfg.aisHost, cfg.aisPort, aisIp1, aisIp1Ok, sentence);    // MarineTraffic
+  sendAisTo(cfg.aisHost2, cfg.aisPort2, aisIp2, aisIp2Ok, sentence);  // VesselFinder (if set)
 }
 
 bool reportAisPosition() {
   if (WiFi.status() != WL_CONNECTED || !gpsValid()) return false;
-  if (!didNetTest) { didNetTest = true; testInternet(); }
   // Use real GPS speed/course when available; in fake-GPS test mode send a
   // plausible stationary value (SOG 0, COG 0) instead of "not available".
   double sog = gps.speed.isValid() ? gps.speed.knots() : (USE_FAKE_GPS ? 0.0 : -1);
@@ -640,6 +640,7 @@ void setup() {
   }
 
   // AP for local config; AP+STA so we can also reach the internet for AIS/Traccar
+  // AP for local config; AP+STA so we can also reach the internet for AIS/Traccar.
   WiFi.mode(WIFI_AP_STA);
   WiFi.persistent(false);
   WiFi.setAutoReconnect(true);
@@ -664,7 +665,9 @@ void setup() {
 
 // ======== MAIN LOOP ========
 void loop() {
-  while (gpsSerial.available() > 0) {
+  // Drain GPS bytes, but cap per loop so RX noise can't spin here forever.
+  int gpsGuard = 0;
+  while (gpsSerial.available() > 0 && gpsGuard++ < 1200) {
     gps.encode(gpsSerial.read());
   }
 
