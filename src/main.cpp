@@ -90,6 +90,9 @@ double currentLng = 0.0;
 unsigned long lastButtonPress = 0;
 unsigned long lastGPSUpdate = 0;
 uint32_t satelliteCount = 0;
+bool gpsLinkOk = false;              // true while bytes are arriving from the GPS module
+unsigned long gpsLastCharCount = 0; // charsProcessed() snapshot for link detection
+unsigned long gpsLastLinkCheck = 0;
 unsigned long lastTraccarReport = 0;
 bool lastReportedAlarm = false;
 unsigned long lastAisPos = 0;
@@ -198,9 +201,14 @@ function u(){fetch('/status').then(r=>r.json()).then(d=>{
   h+='<div class="big">'+(on?(d.alarm?'ALARM!':'P&Aring;'):'AV')+'</div>';
   if(on){h+='<div>'+d.distance.toFixed(1)+' m fra anker</div>';}
   h+='<div class="info">Radius: '+d.radius.toFixed(0)+' m</div></div>';
-  h+='<div class="card"><div>Satellitter: '+d.sats+'</div>';
+  let gs,gc;
+  if(!d.gpsLink){gs='KABELFEIL? ingen data fra modul';gc='warn';}
+  else if(!d.gpsFix){gs='s&oslash;ker... (mottar data, ingen fix)';gc='off';}
+  else{gs='fix ('+d.sats+' sat)';gc='ok';}
+  h+='<div class="card '+gc+'"><div>GPS: '+gs+'</div>';
   h+='<div>Posisjon: '+d.lat.toFixed(6)+', '+d.lng.toFixed(6)+'</div>';
   if(on){h+='<div>Anker: '+d.anchorLat.toFixed(6)+', '+d.anchorLng.toFixed(6)+'</div>';}
+  h+='<div class="info">Diag: '+d.gpsChars+' bytes mottatt, '+d.gpsCsumErr+' sjekksumfeil</div>';
   h+='<div class="info">Internett: '+(d.online?'tilkoblet':'frakoblet')+'</div>';
   h+='</div><div class="card">';
   if(on){h+='<button onclick="dis()">Sl&aring; av ankervakt</button>';}
@@ -359,6 +367,10 @@ void handleStatus() {
   json += "\"radius\":" + String(anchor.alarmRadius, 1) + ",";
   json += "\"alarm\":" + String(anchor.alarmActive ? "true" : "false") + ",";
   json += "\"sats\":" + String(satelliteCount) + ",";
+  json += "\"gpsLink\":" + String(gpsLinkOk ? "true" : "false") + ",";
+  json += "\"gpsFix\":" + String(gps.location.isValid() ? "true" : "false") + ",";
+  json += "\"gpsChars\":" + String(gps.charsProcessed()) + ",";
+  json += "\"gpsCsumErr\":" + String(gps.failedChecksum()) + ",";
   json += "\"online\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false");
   json += "}";
   server.send(200, "application/json", json);
@@ -523,12 +535,18 @@ void renderDisplay() {
   display.print("Ankervakt: ");
   display.print(anchor.anchorSet ? (anchor.alarmActive ? "ALARM" : "PAA") : "AV");
 
-  // GPS strength (satellites + signal bars)
+  // GPS strength, or a fault/searching indicator.
   display.setCursor(0, 16);
   display.print("GPS: ");
-  display.print(sats);
-  display.print(" sat");
-  drawSignalBars(128 - 30, 15, signalBars(sats));
+  if (!USE_FAKE_GPS && !gpsLinkOk && millis() > 4000) {
+    display.print("FEIL (kabel?)");   // no data from module — check wiring
+  } else if (!gpsValid()) {
+    display.print("soker...");         // link OK, but no fix yet
+  } else {
+    display.print(sats);
+    display.print(" sat");
+    drawSignalBars(128 - 30, 15, signalBars(sats));
+  }
 
   // Anchor radius
   display.setCursor(0, 30);
@@ -733,6 +751,16 @@ void loop() {
   int gpsGuard = 0;
   while (gpsSerial.available() > 0 && gpsGuard++ < 1200) {
     gps.encode(gpsSerial.read());
+  }
+
+  // Detect whether the GPS module is actually sending data. If no new bytes
+  // arrive between checks, the link is down (broken cable / loose wire / dead
+  // module) — distinct from "connected but no fix yet".
+  if (millis() - gpsLastLinkCheck > 2000) {
+    unsigned long n = gps.charsProcessed();
+    gpsLinkOk = (n > gpsLastCharCount);
+    gpsLastCharCount = n;
+    gpsLastLinkCheck = millis();
   }
 
   if (USE_FAKE_GPS) {
