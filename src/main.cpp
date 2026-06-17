@@ -3,6 +3,7 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiUdp.h>
+#include <ESP8266mDNS.h>
 #include <EEPROM.h>
 #include <TinyGPSPlus.h>
 #include <SoftwareSerial.h>
@@ -74,6 +75,15 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 static const uint8_t OLED_ADDR = 0x3C;  // try 0x3D if the screen stays blank
 bool oledOK = false;
 unsigned long lastDisplay = 0;
+
+// Anchor swing track: recent boat offsets (metres East/North) from the anchor.
+static const int TRACK_N = 120;
+float trackE[TRACK_N];
+float trackN[TRACK_N];
+int trackCount = 0;
+int trackHead = 0;
+unsigned long lastTrackPt = 0;
+double trackAnchorLat = 0, trackAnchorLng = 0;
 
 double currentLat = 0.0;
 double currentLng = 0.0;
@@ -178,6 +188,7 @@ void handleRoot() {
 </head><body>
 <h1>&#9875; Ankervakt</h1>
 <div id='d'></div>
+<div class="card"><div class="info">Svingm&oslash;nster rundt anker</div><canvas id="sw" width="280" height="280" style="background:#0f1a30;border-radius:8px;max-width:100%;margin-top:8px"></canvas></div>
 <p><a href='/settings'>&#9881; Innstillinger</a></p>
 <script>
 function u(){fetch('/status').then(r=>r.json()).then(d=>{
@@ -203,7 +214,21 @@ function arm(){fetch('/arm').then(r=>r.text()).then(t=>{if(t=='NO_FIX'){alert('I
 function dis(){fetch('/disarm').then(()=>u())}
 function sl(){fetch('/silence').then(()=>u())}
 function sr(){fetch('/radius?r='+document.getElementById('r').value).then(()=>u())}
-setInterval(u,2000);u();
+function dt(){fetch('/track').then(r=>r.json()).then(d=>{
+  let c=document.getElementById('sw'),x=c.getContext('2d'),W=c.width,H=c.height,cx=W/2,cy=H/2;
+  x.clearRect(0,0,W,H);x.textAlign='center';
+  if(!d.set){x.fillStyle='#888';x.fillText('Ankervakt av',cx,cy);return;}
+  let maxm=d.r*1.15;
+  d.pts.forEach(p=>{let m=Math.hypot(p[0],p[1]);if(m>maxm)maxm=m*1.1;});
+  let sc=(Math.min(W,H)/2-12)/maxm;
+  x.strokeStyle='#0f0';x.lineWidth=1;x.beginPath();x.arc(cx,cy,d.r*sc,0,7);x.stroke();
+  x.strokeStyle='#39f';x.beginPath();
+  d.pts.forEach((p,i)=>{let px=cx+p[0]*sc,py=cy-p[1]*sc;i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();
+  x.fillStyle='#39f';d.pts.forEach(p=>{x.beginPath();x.arc(cx+p[0]*sc,cy-p[1]*sc,2,0,7);x.fill();});
+  x.fillStyle='#e94560';x.beginPath();x.arc(cx,cy,4,0,7);x.fill();
+  if(d.pts.length){let p=d.pts[d.pts.length-1];x.fillStyle='#fff';x.beginPath();x.arc(cx+p[0]*sc,cy-p[1]*sc,5,0,7);x.fill();}
+})}
+setInterval(u,2000);u();setInterval(dt,3000);dt();
 </script>
 </body></html>
 )rawhtml";
@@ -519,12 +544,44 @@ void renderDisplay() {
     display.print(" m");
   }
 
-  // Internet status
+  // Internet status / IP (so you know where to reach the config page)
   display.setCursor(0, 54);
-  display.print("Nett: ");
-  display.print(WiFi.status() == WL_CONNECTED ? "online" : "offline");
+  if (WiFi.status() == WL_CONNECTED) display.print(WiFi.localIP().toString());
+  else display.print("Nett: offline");
 
   display.display();
+}
+
+// Log one point of the anchor swing track (offset in metres from the anchor).
+void addTrackPoint() {
+  if (!anchor.anchorSet || !gpsValid()) return;
+  // Reset the track if the anchor moved (re-armed at a new spot).
+  if (anchor.anchorLat != trackAnchorLat || anchor.anchorLng != trackAnchorLng) {
+    trackAnchorLat = anchor.anchorLat;
+    trackAnchorLng = anchor.anchorLng;
+    trackCount = 0;
+    trackHead = 0;
+  }
+  float north = (float)((currentLat - anchor.anchorLat) * 111320.0);
+  float east = (float)((currentLng - anchor.anchorLng) * 111320.0 * cos(radians(anchor.anchorLat)));
+  trackE[trackHead] = east;
+  trackN[trackHead] = north;
+  trackHead = (trackHead + 1) % TRACK_N;
+  if (trackCount < TRACK_N) trackCount++;
+}
+
+// Web: the swing track as JSON (radius + offsets in metres, oldest first).
+void handleTrack() {
+  String j = "{\"r\":" + String(anchor.alarmRadius, 1);
+  j += ",\"set\":" + String(anchor.anchorSet ? "true" : "false") + ",\"pts\":[";
+  int startIdx = (trackHead - trackCount + TRACK_N) % TRACK_N;
+  for (int i = 0; i < trackCount; i++) {
+    int idx = (startIdx + i) % TRACK_N;
+    if (i) j += ",";
+    j += "[" + String(trackE[idx], 1) + "," + String(trackN[idx], 1) + "]";
+  }
+  j += "]}";
+  server.send(200, "application/json", j);
 }
 
 // ======== TRACCAR REPORTING ========
@@ -649,6 +706,12 @@ void setup() {
   Serial.println(WiFi.softAPIP());
   applyWifi();
 
+  // mDNS so the config page is reachable at http://anchorwatch.local on the LAN
+  if (MDNS.begin("anchorwatch")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("mDNS started: http://anchorwatch.local");
+  }
+
   server.on("/", handleRoot);
   server.on("/settings", handleSettings);
   server.on("/status", handleStatus);
@@ -659,6 +722,7 @@ void setup() {
   server.on("/radius", handleRadius);
   server.on("/arm", handleArm);
   server.on("/disarm", handleDisarm);
+  server.on("/track", handleTrack);
   server.begin();
   Serial.println("Web server started");
 }
@@ -699,6 +763,21 @@ void loop() {
     renderDisplay();
   }
 
+  // Log a swing-track point every 15s (when armed + has a fix)
+  if (millis() - lastTrackPt > 15000) {
+    lastTrackPt = millis();
+    addTrackPoint();
+  }
+
+  // [TEMP] GPS diagnostic: is data arriving + being parsed?
+  static unsigned long lastGpsDbg = 0;
+  if (millis() - lastGpsDbg > 5000) {
+    lastGpsDbg = millis();
+    Serial.printf("GPS dbg: chars=%lu sentences=%lu csumErr=%lu fix=%d sats=%lu\n",
+                  gps.charsProcessed(), gps.sentencesWithFix(), gps.failedChecksum(),
+                  (int)gps.location.isValid(), gps.satellites.value());
+  }
+
   // Traccar: periodic + immediately on alarm change
   if (strlen(cfg.staSsid) > 0 && strlen(cfg.traccarHost) > 0) {
     bool alarmNow = anchor.alarmActive;
@@ -719,5 +798,6 @@ void loop() {
     }
   }
 
+  MDNS.update();
   server.handleClient();
 }
